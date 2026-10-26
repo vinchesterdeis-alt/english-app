@@ -187,13 +187,20 @@ function currentStreak() {
   return [dayKey(), dayKey(y)].includes(state.streak.last) ? state.streak.count : 0;
 }
 
-// Начислить опыт; вернуть новое звание, если оно получено
+// Начислить опыт (или снять за плохой результат); вернуть новое звание, если оно сменилось
+const MAX_PENALTY = 30;   // больше 30 XP за одно задание не снимаем
 function addXP(n) {
-  if (n <= 0) return null;
+  n = Math.round(n);
+  if (!n) return null;
   const before = rankIndex(state.xp);
-  state.xp += n;
+  state.xp = Math.max(0, state.xp + n);
   if (state.today.date !== dayKey()) state.today = { date: dayKey(), xp: 0 };
-  state.today.xp += n;
+  state.today.xp = Math.max(0, state.today.xp + n);
+  if (n < 0) {
+    saveState();
+    const after = rankIndex(state.xp);
+    return after < before ? { ...RANKS[after], down: true } : null;
+  }
   if (state.streak.last !== dayKey()) {
     const y = new Date();
     y.setDate(y.getDate() - 1);
@@ -391,10 +398,11 @@ function runQuiz(title, questions, back, onFinish, next_) {
   }
 
   function finish() {
-    const rank = addXP(right * 5);
+    const xp = Math.max(-MAX_PENALTY, right * 5 - wrongList.length * 3);   // ошибка −3
+    const rank = addXP(xp);
     if (onFinish) onFinish(right, questions.length, results);
     renderResult({
-      title, xp: right * 5, rank,
+      title, xp, rank,
       summary: `Верно ${right} из ${questions.length}.` + (wrongList.length ? ' Ошибки попали в «Мои ошибки» — их можно прогнать отдельно.' : ' Без единой ошибки! 🔥'),
       again: () => runQuiz(title, questions.map(q => ({ ...q, options: shuffle(q.options) })), back, onFinish, next_),
       back, next: next_,
@@ -406,16 +414,17 @@ function runQuiz(title, questions, back, onFinish, next_) {
 }
 
 function renderResult({ title, xp, rank, summary, again, back, next }) {
-  if (rank) { sfx.rankup(); buzz([80, 60, 80]); } else sfx.finish();
+  if (rank && !rank.down) { sfx.rankup(); buzz([80, 60, 80]); } else if (xp < 0) { sfx.wrong(); buzz(); } else sfx.finish();
   show(
     topbar(title, back),
     el('div', { class: 'result' },
-      rank ? el('div', { class: 'rankup' },
+      rank ? el('div', { class: 'rankup' + (rank.down ? ' rankdown' : '') },
         el('div', { class: 'rankup-icon' }, rank.icon),
-        el('div', {}, 'Новое звание!'),
+        el('div', {}, rank.down ? 'Звание понижено 😬' : 'Новое звание!'),
         el('div', { class: 'rank-name' }, rank.name),
-        el('div', {}, rank.quote)) : null,
-      el('div', { class: 'result-xp' }, `+${xp} XP`),
+        el('div', {}, rank.down ? 'Ничего, отыграешься — следующий тест поднимет обратно.' : rank.quote)) : null,
+      el('div', { class: 'result-xp' + (xp < 0 ? ' minus' : '') }, `${xp < 0 ? '−' + -xp : '+' + xp} XP`),
+      xp < 0 ? el('p', { class: 'muted small' }, 'Слабый результат — опыт снят. Ошибки из тестов ждут в «Мои ошибки», прогони их — и всё вернётся.') : null,
       el('p', {}, summary),
       rankCard(),
       next
@@ -606,7 +615,7 @@ function renderGameIntro(g) {
 }
 
 function finishGame(g, xp, summary) {
-  xp = Math.max(0, Math.round(xp));
+  xp = Math.max(-MAX_PENALTY, Math.round(xp));
   state.games[g.id] = Math.max(state.games[g.id] || 0, xp);
   const rank = addXP(xp);
   renderResult({ title: g.icon + ' ' + g.name, xp, rank, summary, again: () => g.start(g), back: renderGames });
@@ -674,11 +683,12 @@ function gameBuilder(g, opts = {}) {
   const area = el('div');
   show(...gameHeader(g, info), area);
   const set = opts.set || shuffle(SENTENCES).slice(0, 6);
-  let i = 0, right = 0, mistakes = 0;
+  let i = 0, right = 0, mistakes = 0, skipped = 0;
 
   function next() {
     if (i === set.length && opts.onDone) return opts.onDone(right);
-    if (i === set.length) return finishGame(g, right * 8 - mistakes * 2, `Собрано фраз: ${right} из ${set.length}, ошибок: ${mistakes}.`);
+    if (i === set.length) return finishGame(g, right * 8 - mistakes * 2 - skipped * 4,
+      `Собрано фраз: ${right} из ${set.length}, ошибок: ${mistakes}, пропущено: ${skipped}.`);
     const [en, ru] = set[i];
     const words = en.split(' ');
     let tiles;
@@ -716,7 +726,7 @@ function gameBuilder(g, opts = {}) {
     area.replaceChildren(
       el('div', { class: 'question' }, ru),
       ansRow, pool,
-      el('button', { class: 'btn', onclick: () => { i++; next(); } }, 'Пропустить'));
+      el('button', { class: 'btn', onclick: () => { skipped++; i++; next(); } }, 'Пропустить'));
     draw();
   }
   next();
@@ -735,7 +745,7 @@ function gameListen(g) {
   let i = 0, right = 0;
 
   function next() {
-    if (i === set.length) return finishGame(g, right * 6, `Угадано на слух: ${right} из ${set.length}.`);
+    if (i === set.length) return finishGame(g, right * 6 - (set.length - right) * 3, `Угадано на слух: ${right} из ${set.length}.`);
     const w = set[i];
     info.textContent = `Слово ${i + 1} из ${set.length} · верно ${right}`;
     const others = shuffle(ALL_WORDS.filter(x => x.en !== w.en)).slice(0, 3);
@@ -789,7 +799,7 @@ function playDialog(g, d) {
   function next() {
     if (i === d.steps.length) {
       state.games['dialog:' + d.id] = Math.max(state.games['dialog:' + d.id] || 0, right);
-      return finishGame({ ...g, start: () => playDialog(g, d) }, right * 6,
+      return finishGame({ ...g, start: () => playDialog(g, d) }, right * 6 - (d.steps.length - right) * 3,
         `Сцена «${d.name}»: удачных ответов ${right} из ${d.steps.length}.` + (right === d.steps.length ? ' Как носитель! 🔥' : ''));
     }
     const [who, en, ru, replies] = d.steps[i];
@@ -854,7 +864,7 @@ function gameSpeed(g) {
   every(() => {
     left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
     draw();
-    if (left === 0) finishGame(g, right * 3 - wrong, `Переведено: ${right}, ошибок: ${wrong}.` + (right >= 20 ? ' Скорость огонь! ⚡' : ''));
+    if (left === 0) finishGame(g, right * 3 - wrong * 2, `Переведено: ${right}, ошибок: ${wrong}.` + (right >= 20 ? ' Скорость огонь! ⚡' : ''));
   }, 200);
 
   function draw() { info.textContent = `⏱ ${left} с · ✅ ${right} · ❌ ${wrong}`; }
@@ -1000,7 +1010,7 @@ function showNewWords(words, i) {
 function renderRanks() {
   const cur = rankIndex(state.xp);
   show(topbar('Звания', renderHome),
-    el('p', { class: 'muted' }, `У тебя ${state.xp} XP. Опыт даётся за тесты, карточки и игры.`),
+    el('p', { class: 'muted' }, `У тебя ${state.xp} XP. Опыт даётся за тесты, карточки и игры, а за плохой результат снимается (не больше ${MAX_PENALTY} XP за раз).`),
     RANKS.map((r, i) => el('div', { class: 'rank-row' + (i > cur ? ' locked' : '') + (i === cur ? ' current' : '') },
       el('div', { class: 'rank-row-icon' }, r.icon),
       el('div', {},
