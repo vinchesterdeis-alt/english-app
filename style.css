@@ -131,6 +131,17 @@ p { margin: 10px 0; line-height: 1.5; }
 .tile-word.used { visibility: hidden; }
 .listen-btn { display: block; width: 100%; background: var(--accent-soft); border-radius: 20px; padding: 22px; font-size: 44px; margin: 10px 0 16px; }
 
+/* Диалог-квест и скоростной перевод */
+.chat { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 14px; }
+.bubble { max-width: 88%; padding: 10px 13px; border-radius: 18px; line-height: 1.4; animation: pop .25s; }
+.bubble.them { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
+.bubble.me { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 6px; }
+.bubble-row { display: flex; gap: 10px; align-items: center; justify-content: space-between; font-family: var(--serif); font-size: 19px; margin: 2px 0; }
+.bubble-row .say-btn { width: 34px; height: 34px; font-size: 15px; }
+.link-btn { background: none; padding: 4px 0 0; color: var(--accent); font-size: 13px; font-weight: 600; }
+.speed-info { font-weight: 700; font-size: 18px; text-align: center; }
+.speed-word { text-align: center; margin: 22px 0 18px; }
+
 /* Результат и звания */
 .result { text-align: center; }
 .result-xp { font-family: var(--serif); font-size: 50px; color: var(--gold); margin: 14px 0 4px; }

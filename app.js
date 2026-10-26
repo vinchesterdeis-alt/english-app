@@ -150,7 +150,7 @@ const WORD_BY_ID = Object.fromEntries(ALL_WORDS.map(w => [w.id, w]));
 const themeById = id => THEMES.find(t => t.id === id);
 
 // Порядок слов в «Уроке дня»: от простых тем к профессиональным, по 5 слов из темы вперемешку
-const COURSE_THEMES = ['basic', 'series', 'kitchen', 'sport', 'games', 'it', 'ai', 'python', 'video'];
+const COURSE_THEMES = ['basic', 'series', 'kitchen', 'sport', 'games', 'it', 'ai', 'python', 'video', 'irregular', 'phrasal'];
 const COURSE_ORDER = (() => {
   const queues = [...COURSE_THEMES, ...THEMES.map(t => t.id).filter(id => !COURSE_THEMES.includes(id))]
     .map(id => ALL_WORDS.filter(w => w.theme === id));
@@ -218,7 +218,24 @@ function markMistake(key, wrong) {
 }
 
 // ================= Вопросы для теста =================
+// Неправильные глаголы: спрашиваем 2-ю или 3-ю форму. Для burn, learn… форма на -ed тоже верна — её не подсовываем
+const ED_ALSO_OK = ['burn', 'learn', 'dream', 'fit', 'quit', 'bet'];
+function irregularQuestion(w) {
+  const [base, past, part] = w.en.split(' – ');
+  const second = Math.random() < 0.5;
+  const answer = second ? past : part;
+  const fake = ED_ALSO_OK.includes(base) ? null : base + (base.endsWith('e') ? 'd' : 'ed');
+  const others = shuffle(ALL_WORDS.filter(x => x.theme === 'irregular' && x.id !== w.id)).map(x => x.en.split(' – ')[second ? 1 : 2]);
+  const options = [answer];
+  for (const o of [fake, second ? part : past, base, ...others]) if (o && !options.includes(o) && options.length < 4) options.push(o);
+  return { q: second ? `Прошедшее время (2-я форма) от «${base}» — «${w.ru}»?` : `Третья форма от «${base}» (I have …)?`,
+    say: w.en, options: shuffle(options), answer, key: 'w:' + w.id,
+    explain: `${w.en} — «${w.ru}». ${second ? 'Вторая форма — для прошедшего: вчера, год назад.' : 'Третья форма — после have/has и was/were.'}` +
+      (w.note ? ' ' + w.note : '') + (w.example ? ' Пример: ' + w.example : '') };
+}
+
 function wordQuestion(w) {
+  if (w.theme === 'irregular' && Math.random() < 0.6) return irregularQuestion(w);
   const sameTheme = ALL_WORDS.filter(x => x.theme === w.theme && x.en !== w.en && x.ru !== w.ru);
   const pool = sameTheme.length >= 3 ? sameTheme : ALL_WORDS.filter(x => x.en !== w.en && x.ru !== w.ru);
   const others = shuffle(pool).slice(0, 3);
@@ -327,7 +344,7 @@ function renderHome() {
       tile('📝', 'Тест', '10 вопросов с объяснениями', () => runQuiz('📝 Тест', mixedTest(), renderHome), '#ece6ff'),
       tile('🃏', 'Карточки', due ? `${due} ждут повторения` : 'учить новые слова', () => startCards(null, renderHome), '#ffe1ec'),
       tile('📚', 'Грамматика', `${LESSONS.length} уроков простыми словами`, renderLessons, '#dff3ff'),
-      tile('🎮', 'Игры', '3 игры', renderGames, '#e2f7e8'),
+      tile('🎮', 'Игры', `${GAMES.length} игр`, renderGames, '#e2f7e8'),
       tile('🗂', 'Темы', 'сериалы, игры, спорт…', renderThemes, '#fff1d6'),
       tile('❌', 'Мои ошибки', mistakes ? `${mistakes} на проработку` : 'пока пусто', renderMistakes, '#fde4dc')));
 }
@@ -562,6 +579,12 @@ const GAMES = [
     rules: ['Показан перевод фразы и перемешанные английские слова.', 'Нажимай слова по порядку, чтобы собрать фразу.', 'Ошибся — нажми на слово в ответе, и оно вернётся.'] },
   { id: 'listen', icon: '👂', name: 'Угадай на слух', start: gameListen,
     rules: ['Телефон произносит слово или фразу — выбери, что прозвучало.', 'Можно переслушать кнопкой 🔊.', 'Нет звука? Включи английский голос: Настройки Android → Синтез речи (или «Озвучивание текста») → Google → установить «English».'] },
+  { id: 'dialog', icon: '💬', name: 'Диалог-квест', start: gameDialog,
+    rules: ['Живые сцены: пиццерия, собеседование, заказчик, лобби CS, аэропорт и даже полиция Лос-Сантоса.', 'Собеседник говорит фразу — выбери, что ответишь. Не понял — нажми «Перевод».', 'Неверный ответ не провал: увидишь, почему так не говорят, и диалог пойдёт дальше.'] },
+  { id: 'hero', icon: '🎭', name: 'Что сказал герой?', start: gameHero,
+    rules: ['Фразы героев «Теории большого взрыва», «Офиса», «Во все тяжкие», «Очень странных дел», «Сверхъестественного», «Бесстыжих», GTA и CS.', 'Выбери верный перевод.', 'После ответа — пояснение: какое правило или сленг спрятан во фразе.'] },
+  { id: 'speed', icon: '⚡', name: 'Скоростной перевод', start: gameSpeed,
+    rules: ['60 секунд: переведи как можно больше слов.', 'Ошибка отнимает 3 секунды.', 'Слова берутся из тех, что ты уже начал учить, — отличная тренировка памяти.'] },
 ];
 
 function renderGames() {
@@ -739,6 +762,121 @@ function gameListen(g) {
         el('button', { class: 'btn primary', onclick: () => { i++; next(); } }, 'Дальше →'));
     }
   }
+  next();
+}
+
+// --- Диалог-квест ---
+function gameDialog(g) {
+  show(topbar(g.icon + ' ' + g.name, () => renderGameIntro(g)),
+    el('p', { class: 'muted' }, 'Выбери сцену:'),
+    DIALOGS.map(d => {
+      const best = state.games['dialog:' + d.id];
+      return el('button', { class: 'theme-row', onclick: () => playDialog(g, d) },
+        el('div', { class: 'theme-icon' }, d.icon),
+        el('div', { class: 'theme-info' },
+          el('div', { class: 'tile-name' }, d.name),
+          el('div', { class: 'small muted' }, best != null ? `лучший результат: ${best} из ${d.steps.length}` : 'не пройдена')));
+    }));
+}
+
+function playDialog(g, d) {
+  const info = el('div', { class: 'muted small' });
+  const chat = el('div', { class: 'chat' });
+  const area = el('div');
+  show(topbar(d.icon + ' ' + d.name, () => gameDialog(g)), info, el('p', { class: 'muted' }, d.intro), chat, area);
+  let i = 0, right = 0;
+
+  function next() {
+    if (i === d.steps.length) {
+      state.games['dialog:' + d.id] = Math.max(state.games['dialog:' + d.id] || 0, right);
+      return finishGame({ ...g, start: () => playDialog(g, d) }, right * 6,
+        `Сцена «${d.name}»: удачных ответов ${right} из ${d.steps.length}.` + (right === d.steps.length ? ' Как носитель! 🔥' : ''));
+    }
+    const [who, en, ru, replies] = d.steps[i];
+    info.textContent = `Реплика ${i + 1} из ${d.steps.length} · удачно ${right}`;
+    const tr = el('div', { class: 'small muted', hidden: '' }, ru);
+    chat.append(el('div', { class: 'bubble them' },
+      el('div', { class: 'small muted' }, who),
+      el('div', { class: 'bubble-row' }, el('span', {}, en), sayButton(en)),
+      tr,
+      el('button', { class: 'link-btn', onclick: e => { tr.hidden = false; e.target.remove(); } }, 'Перевод')));
+    if (state.autoSpeak) later(() => speak(en), 250);
+    const explain = el('div', { class: 'explain', hidden: '' });
+    const opts = shuffle(replies).map(r => el('button', { class: 'option', onclick: () => answer(r) }, r[0]));
+    area.replaceChildren(el('div', { class: 'options' }, opts), explain);
+    opts[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    function answer(r) {
+      const good = replies.find(x => x[1]);
+      opts.forEach(b => {
+        b.disabled = true;
+        if (b.textContent === good[0]) b.classList.add('right');
+        else if (b.textContent === r[0]) b.classList.add('wrong');
+      });
+      if (r[1]) { right++; sfx.right(); } else { sfx.wrong(); buzz(); }
+      speak(good[0]);
+      explain.hidden = false;
+      explain.replaceChildren(
+        el('div', { class: 'explain-head' }, r[1] ? '✅ Отличный ответ!' : '❌ Так не скажут'),
+        el('p', {}, r[1] ? r[2] : `${r[2]} Лучше: «${good[0]}» — ${good[2]}`),
+        el('button', { class: 'btn primary', onclick: () => {
+          chat.append(el('div', { class: 'bubble me' }, good[0]));
+          i++; next();
+        } }, i + 1 < d.steps.length ? 'Дальше →' : 'Итог'));
+      explain.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+  next();
+}
+
+// --- Что сказал герой? ---
+function gameHero(g) {
+  const qs = shuffle(HERO_LINES).slice(0, 10).map(([who, icon, en, ru, wrong, note]) => ({
+    q: `${icon} ${who}: «${en}»`, say: en, sayFirst: true,
+    options: shuffle([ru, ...wrong]), answer: ru, explain: `«${en}» — «${ru}». ${note}` }));
+  runQuiz(g.icon + ' ' + g.name, qs, renderGames, right => {
+    state.games[g.id] = Math.max(state.games[g.id] || 0, right * 5);
+    saveState();
+  });
+}
+
+// --- Скоростной перевод ---
+function gameSpeed(g) {
+  const info = el('div', { class: 'speed-info' });
+  const area = el('div');
+  show(...gameHeader(g, info), area);
+  const short = w => w.en.length <= 22 && w.ru.length <= 30;
+  const started = ALL_WORDS.filter(w => state.cards[w.id] && short(w));
+  const pool = started.length >= 20 ? started : ALL_WORDS.filter(w => ['basic', 'series', 'kitchen'].includes(w.theme) && short(w));
+  let left = 60, right = 0, wrong = 0, last = null;
+  let deadline = Date.now() + 60000;
+
+  every(() => {
+    left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    draw();
+    if (left === 0) finishGame(g, right * 3 - wrong, `Переведено: ${right}, ошибок: ${wrong}.` + (right >= 20 ? ' Скорость огонь! ⚡' : ''));
+  }, 200);
+
+  function draw() { info.textContent = `⏱ ${left} с · ✅ ${right} · ❌ ${wrong}`; }
+
+  function next() {
+    let w;
+    do { w = pick(pool); } while (w === last && pool.length > 1);
+    last = w;
+    const others = shuffle(pool.filter(x => x.ru !== w.ru)).slice(0, 3);
+    const opts = shuffle([w, ...others]).map(o => el('button', { class: 'option', onclick: () => answer(o, opts) }, o.ru));
+    area.replaceChildren(el('div', { class: 'card-en speed-word' }, w.en), el('div', { class: 'options' }, opts));
+
+    function answer(o, btns) {
+      const ok = o.ru === w.ru;
+      markMistake('w:' + w.id, !ok);
+      btns.forEach(b => { b.disabled = true; if (b.textContent === w.ru) b.classList.add('right'); else if (b.textContent === o.ru) b.classList.add('wrong'); });
+      if (ok) { right++; sfx.right(); } else { wrong++; deadline -= 3000; sfx.wrong(); buzz(); }
+      draw();
+      later(next, ok ? 250 : 700);
+    }
+  }
+  draw();
   next();
 }
 
