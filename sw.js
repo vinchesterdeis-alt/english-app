@@ -1,6 +1,6 @@
 // Офлайн-режим: сначала спрашиваем сервер (чтобы обновления приходили сами),
 // без интернета отдаём сохранённую копию.
-const CACHE = 'duyuspik-v1';
+const CACHE = 'duyuspik-v2';
 const FILES = ['./', 'index.html', 'style.css', 'data.js', 'app.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png'];
 

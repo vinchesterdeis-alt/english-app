@@ -7,7 +7,8 @@ const INTERVALS = [0, 1, 2, 4, 8, 16, 32];   // дней до следующег
 
 function freshState() {
   return { xp: 0, today: { date: null, xp: 0 }, streak: { last: null, count: 0 },
-    cards: {}, mistakes: {}, lessons: {}, games: {}, sound: true, autoSpeak: true, slow: false };
+    cards: {}, mistakes: {}, lessons: {}, games: {}, sound: true, autoSpeak: true, slow: false,
+    daily: null, courseDays: 0 };
 }
 
 function loadState() {
@@ -147,6 +148,20 @@ const ALL_WORDS = THEMES.flatMap(t => WORDS[t.id].map(([en, ru, note, example]) 
   ({ id: `${t.id}:${en}`, theme: t.id, en, ru, note: note || '', example: example || '' })));
 const WORD_BY_ID = Object.fromEntries(ALL_WORDS.map(w => [w.id, w]));
 const themeById = id => THEMES.find(t => t.id === id);
+
+// Порядок слов в «Уроке дня»: от простых тем к профессиональным, по 5 слов из темы вперемешку
+const COURSE_THEMES = ['basic', 'series', 'kitchen', 'sport', 'games', 'it', 'ai', 'python', 'video'];
+const COURSE_ORDER = (() => {
+  const queues = [...COURSE_THEMES, ...THEMES.map(t => t.id).filter(id => !COURSE_THEMES.includes(id))]
+    .map(id => ALL_WORDS.filter(w => w.theme === id));
+  const order = [];
+  while (queues.some(q => q.length)) {
+    for (const q of queues) order.push(...q.splice(0, 5));
+  }
+  return order;
+})();
+const WORDS_PER_DAY = 10;
+const COURSE_DAYS = Math.ceil(COURSE_ORDER.length / WORDS_PER_DAY);
 
 function explainWord(w) {
   const parts = [`«${w.en}» — это «${w.ru}».`];
@@ -300,6 +315,14 @@ function renderHome() {
     el('div', { class: 'goal' },
       el('div', { class: 'goal-row' }, el('b', {}, '🎯 Цель дня'), el('span', {}, `${todayXP()} / ${DAILY_GOAL} XP`)),
       el('div', { class: 'bar' }, el('div', { class: 'bar-fill goal-fill', style: `width:${goal}%` }))),
+    (() => {
+      const d = state.daily && state.daily.date === dayKey() ? state.daily : null;
+      const sub = d && d.done ? '✅ на сегодня пройден — новые слова завтра'
+        : `день ${state.courseDays + 1} из ${COURSE_DAYS} · ${WORDS_PER_DAY} новых слов` +
+          (d ? ` · шагов ${Object.keys(d.steps).length} из ${DAILY_STEPS.length}` : '');
+      return el('button', { class: 'tile daily-tile', onclick: renderDaily },
+        el('div', { class: 'tile-icon' }, '📅'), el('div', { class: 'tile-name' }, 'Урок дня'), el('div', { class: 'tile-sub' }, sub));
+    })(),
     el('div', { class: 'tiles' },
       tile('📝', 'Тест', '10 вопросов с объяснениями', () => runQuiz('📝 Тест', mixedTest(), renderHome), '#ece6ff'),
       tile('🃏', 'Карточки', due ? `${due} ждут повторения` : 'учить новые слова', () => startCards(null, renderHome), '#ffe1ec'),
@@ -310,9 +333,10 @@ function renderHome() {
 }
 
 // ================= Тест =================
-function runQuiz(title, questions, back, onFinish) {
+// next = {label, fn} — кнопка продолжения вместо «Ещё раз» (нужна «Уроку дня»)
+function runQuiz(title, questions, back, onFinish, next_) {
   let i = 0, right = 0;
-  const wrongList = [];
+  const wrongList = [], results = [];
   const counter = el('div', { class: 'muted small' });
   const box = el('div');
 
@@ -335,6 +359,7 @@ function runQuiz(title, questions, back, onFinish) {
         else if (b.textContent === o) b.classList.add('wrong');
       });
       if (ok) { right++; sfx.right(); } else { sfx.wrong(); buzz(); wrongList.push(q); }
+      results.push({ q, ok });
       markMistake(q.key, !ok);
       explain.hidden = false;
       explain.replaceChildren(
@@ -350,12 +375,12 @@ function runQuiz(title, questions, back, onFinish) {
 
   function finish() {
     const rank = addXP(right * 5);
-    if (onFinish) onFinish(right, questions.length);
+    if (onFinish) onFinish(right, questions.length, results);
     renderResult({
       title, xp: right * 5, rank,
       summary: `Верно ${right} из ${questions.length}.` + (wrongList.length ? ' Ошибки попали в «Мои ошибки» — их можно прогнать отдельно.' : ' Без единой ошибки! 🔥'),
-      again: () => runQuiz(title, questions.map(q => ({ ...q, options: shuffle(q.options) })), back, onFinish),
-      back,
+      again: () => runQuiz(title, questions.map(q => ({ ...q, options: shuffle(q.options) })), back, onFinish, next_),
+      back, next: next_,
     });
   }
 
@@ -363,7 +388,7 @@ function runQuiz(title, questions, back, onFinish) {
   next();
 }
 
-function renderResult({ title, xp, rank, summary, again, back }) {
+function renderResult({ title, xp, rank, summary, again, back, next }) {
   if (rank) { sfx.rankup(); buzz([80, 60, 80]); } else sfx.finish();
   show(
     topbar(title, back),
@@ -376,14 +401,18 @@ function renderResult({ title, xp, rank, summary, again, back }) {
       el('div', { class: 'result-xp' }, `+${xp} XP`),
       el('p', {}, summary),
       rankCard(),
-      el('div', { class: 'row' },
-        el('button', { class: 'btn', onclick: renderHome }, 'На главную'),
-        again ? el('button', { class: 'btn primary', onclick: again }, 'Ещё раз') : null)));
+      next
+        ? el('button', { class: 'btn primary big', onclick: next.fn }, next.label)
+        : el('div', { class: 'row' },
+          el('button', { class: 'btn', onclick: renderHome }, 'На главную'),
+          again ? el('button', { class: 'btn primary', onclick: again }, 'Ещё раз') : null)));
 }
 
 // ================= Карточки (умное повторение) =================
-function startCards(themeId, back) {
-  const queue = [...shuffle(dueCards(themeId)).slice(0, 20), ...shuffle(newCards(themeId)).slice(0, 10)];
+// opts: {onlyDue — без новых слов, next — {label, fn} для «Урока дня»}
+function startCards(themeId, back, opts = {}) {
+  const queue = [...shuffle(dueCards(themeId)).slice(0, 20), ...(opts.onlyDue ? [] : shuffle(newCards(themeId)).slice(0, 10))];
+  if (!queue.length && opts.next) return opts.next.fn();
   if (!queue.length) {
     show(topbar('🃏 Карточки', back),
       el('div', { class: 'empty' }, el('div', { class: 'big-emoji' }, '🎉'),
@@ -398,7 +427,7 @@ function startCards(themeId, back) {
   function next() {
     if (!queue.length) {
       const rank = addXP(done * 2);
-      return renderResult({ title: '🃏 Карточки', xp: done * 2, rank, back,
+      return renderResult({ title: '🃏 Карточки', xp: done * 2, rank, back, next: opts.next,
         summary: `Пройдено карточек: ${done}. Слова вернутся к тебе, когда начнёшь их забывать.` });
     }
     const w = queue[0];
@@ -561,7 +590,7 @@ function finishGame(g, xp, summary) {
 }
 
 function gameHeader(g, info) {
-  return [topbar(g.icon + ' ' + g.name, () => renderGameIntro(g)), info];
+  return [topbar(g.icon + ' ' + g.name, g.back || (() => renderGameIntro(g))), info];
 }
 
 // --- Найди пару ---
@@ -616,14 +645,16 @@ function gamePairs(g) {
 }
 
 // --- Собери фразу ---
-function gameBuilder(g) {
+// opts: {set — свои фразы, onDone(right) — вместо обычного итога игры (для «Урока дня»)}
+function gameBuilder(g, opts = {}) {
   const info = el('div', { class: 'muted small' });
   const area = el('div');
   show(...gameHeader(g, info), area);
-  const set = shuffle(SENTENCES).slice(0, 6);
+  const set = opts.set || shuffle(SENTENCES).slice(0, 6);
   let i = 0, right = 0, mistakes = 0;
 
   function next() {
+    if (i === set.length && opts.onDone) return opts.onDone(right);
     if (i === set.length) return finishGame(g, right * 8 - mistakes * 2, `Собрано фраз: ${right} из ${set.length}, ошибок: ${mistakes}.`);
     const [en, ru] = set[i];
     const words = en.split(' ');
@@ -709,6 +740,122 @@ function gameListen(g) {
     }
   }
   next();
+}
+
+// ================= Урок дня: 10 новых слов + повторение + грамматика + фраза =================
+const DAILY_STEPS = [
+  { id: 'intro', icon: '🆕', name: 'Новые слова' },
+  { id: 'quiz', icon: '✅', name: 'Проверка новых слов' },
+  { id: 'repeat', icon: '🔁', name: 'Повторение старых слов' },
+  { id: 'grammar', icon: '📚', name: '5 вопросов по грамматике' },
+  { id: 'phrase', icon: '🧱', name: 'Фраза дня' },
+];
+
+function ensureDaily() {
+  if (state.daily && state.daily.date === dayKey()) return state.daily;
+  const words = COURSE_ORDER.filter(w => !state.cards[w.id]).slice(0, WORDS_PER_DAY).map(w => w.id);
+  state.daily = { date: dayKey(), words, steps: {}, done: false, sentence: state.courseDays % SENTENCES.length };
+  saveState();
+  return state.daily;
+}
+
+function dailyStepDone(id) {
+  const d = ensureDaily();
+  d.steps[id] = true;
+  if (!d.done && DAILY_STEPS.every(s => d.steps[s.id])) {
+    d.done = true;
+    state.courseDays += 1;
+    saveState();
+    const rank = addXP(20);
+    return renderResult({ title: '📅 Урок дня', xp: 20, rank, back: renderHome,
+      summary: `День ${state.courseDays} из ${COURSE_DAYS} пройден! Бонус за весь урок. Завтра — следующие ${WORDS_PER_DAY} слов.`,
+      next: { label: 'На главную', fn: renderHome } });
+  }
+  saveState();
+  renderDaily();
+}
+
+function renderDaily() {
+  const d = ensureDaily();
+  const words = d.words.map(id => WORD_BY_ID[id]).filter(Boolean);
+  const dayNo = state.courseDays + (d.done ? 0 : 1);
+  const steps = DAILY_STEPS.map(s => {
+    const done = !!d.steps[s.id];
+    const locked = s.id === 'quiz' && !d.steps.intro;
+    return el('button', { class: 'theme-row step' + (done ? ' done' : '') + (locked ? ' locked' : ''),
+      onclick: () => !locked && startDailyStep(s.id, words, d) },
+      el('div', { class: 'theme-icon' }, done ? '✅' : s.icon),
+      el('div', { class: 'theme-info' },
+        el('div', { class: 'tile-name' }, s.name),
+        el('div', { class: 'small muted' }, locked ? 'сначала посмотри новые слова' : done ? 'готово' : 'нажми, чтобы начать')));
+  });
+  show(topbar('📅 Урок дня', renderHome),
+    el('div', { class: 'goal' },
+      el('div', { class: 'goal-row' }, el('b', {}, `День ${Math.min(dayNo, COURSE_DAYS)} из ${COURSE_DAYS}`),
+        el('span', {}, `${Object.keys(d.steps).length} из ${DAILY_STEPS.length} шагов`)),
+      el('div', { class: 'bar' }, el('div', { class: 'bar-fill goal-fill', style: `width:${state.courseDays / COURSE_DAYS * 100}%` })),
+      el('div', { class: 'small muted' }, words.length
+        ? `Сегодня: ${words.map(w => w.en).slice(0, 4).join(', ')}${words.length > 4 ? '…' : ''}`
+        : 'Все слова курса уже пройдены — повторяй карточки, чтобы не забыть!')),
+    d.done ? el('div', { class: 'explain' }, el('div', { class: 'explain-head' }, '🎉 Урок дня пройден!'),
+      el('p', {}, 'Можно повторить любой шаг ещё раз. Новые слова — завтра.')) : null,
+    steps);
+}
+
+function startDailyStep(id, words, d) {
+  const back = renderDaily;
+  const toDaily = { label: 'Дальше →', fn: () => dailyStepDone(id) };
+  if (id === 'intro') {
+    if (!words.length) return dailyStepDone('intro');
+    return showNewWords(words, 0);
+  }
+  if (id === 'quiz') {
+    if (!words.length) return dailyStepDone('quiz');
+    return runQuiz('✅ Проверка новых слов', words.map(wordQuestion), back, (right, total, results) => {
+      // кто ответил верно — увидит слово завтра, ошибся — ещё сегодня в повторении
+      results.forEach(({ q, ok }) => {
+        const wid = q.key.slice(2);
+        state.cards[wid] = { b: ok ? 1 : 0, due: daysFromNow(ok ? 1 : 0) };
+      });
+      saveState();
+    }, toDaily);
+  }
+  if (id === 'repeat') return startCards(null, back, { onlyDue: true, next: toDaily });
+  if (id === 'grammar') {
+    const qs = shuffle(LESSONS.flatMap(l => l.questions.map((_, i) => [l.id, i]))).slice(0, 5)
+      .map(([lid, i]) => grammarQuestion(lid, i));
+    return runQuiz('📚 Грамматика дня', qs, back, null, toDaily);
+  }
+  if (id === 'phrase') {
+    const g = { ...GAMES.find(x => x.id === 'builder'), name: 'Фраза дня', back };
+    return gameBuilder(g, { set: [SENTENCES[d.sentence]], onDone: () => { addXP(8); dailyStepDone('phrase'); } });
+  }
+}
+
+function showNewWords(words, i) {
+  const w = words[i];
+  const t = themeById(w.theme);
+  show(topbar('🆕 Новые слова', renderDaily),
+    el('div', { class: 'muted small' }, `Слово ${i + 1} из ${words.length}`),
+    el('div', { class: 'flashcard', style: `background:${t.color}` },
+      el('div', { class: 'small muted' }, t.icon + ' ' + t.name),
+      el('div', { class: 'card-en' }, w.en),
+      sayButton(w.en, 'say-btn big-say'),
+      el('div', { class: 'card-back' },
+        el('div', { class: 'card-ru' }, w.ru),
+        w.note ? el('p', { class: 'muted' }, w.note) : null,
+        w.example ? el('p', { class: 'example' }, w.example) : null)),
+    el('div', { class: 'row' },
+      i > 0 ? el('button', { class: 'btn', onclick: () => showNewWords(words, i - 1) }, '← Назад') : null,
+      el('button', { class: 'btn primary', onclick: () => {
+        sfx.tap();
+        if (i + 1 < words.length) return showNewWords(words, i + 1);
+        // слова попадают в карточки: дальше их будет приводить умное повторение
+        words.forEach(x => { if (!state.cards[x.id]) state.cards[x.id] = { b: 0, due: daysFromNow(0) }; });
+        saveState();
+        dailyStepDone('intro');
+      } }, i + 1 < words.length ? 'Дальше →' : 'Запомнил, к проверке →')));
+  if (state.autoSpeak) later(() => speak(w.en), 250);
 }
 
 // ================= Звания и настройки =================
