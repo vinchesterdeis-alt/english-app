@@ -1,7 +1,7 @@
 // Офлайн-режим: сначала спрашиваем сервер (чтобы обновления приходили сами),
 // без интернета отдаём сохранённую копию.
-const CACHE = 'duyuspik-v3';
-const FILES = ['./', 'index.html', 'style.css', 'data.js', 'app.js', 'manifest.json',
+const CACHE = 'duyuspik-v4';
+const FILES = ['./', 'index.html', 'style.css', 'data.js', 'data3.js', 'app.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {

@@ -150,7 +150,8 @@ const WORD_BY_ID = Object.fromEntries(ALL_WORDS.map(w => [w.id, w]));
 const themeById = id => THEMES.find(t => t.id === id);
 
 // Порядок слов в «Уроке дня»: от простых тем к профессиональным, по 5 слов из темы вперемешку
-const COURSE_THEMES = ['basic', 'series', 'kitchen', 'sport', 'games', 'it', 'ai', 'python', 'video', 'irregular', 'phrasal'];
+const COURSE_THEMES = ['basic', 'series', 'kitchen', 'sport', 'games', 'it', 'ai', 'python', 'video', 'irregular', 'phrasal',
+  'work', 'emotions', 'city', 'shopping', 'health', 'time', 'family', 'slang'];
 const COURSE_ORDER = (() => {
   const queues = [...COURSE_THEMES, ...THEMES.map(t => t.id).filter(id => !COURSE_THEMES.includes(id))]
     .map(id => ALL_WORDS.filter(w => w.theme === id));
